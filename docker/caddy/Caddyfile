@@ -1,0 +1,20 @@
+app.crommixmali.com {
+    reverse_proxy platform-web:80
+    encode gzip
+
+    tls {
+        protocols tls1.2 tls1.3
+    }
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy strict-origin-when-cross-origin
+    }
+}
+
+api.crommixmali.com {
+    reverse_proxy platform-web:80
+    encode gzip
+}
