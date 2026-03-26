@@ -92,7 +92,9 @@ class LicensingManager implements LicensingManagerInterface
                 return UsageCounter::where('tenant_id', $tenantId)
                     ->where('key', $key)
                     ->where('period_start', '<=', now())
-                    ->where('period_end', '>=', now())
+                    ->where(function ($q) {
+                        $q->whereNull('period_end')->orWhere('period_end', '>=', now());
+                    })
                     ->sum('used_value');
             }
         );

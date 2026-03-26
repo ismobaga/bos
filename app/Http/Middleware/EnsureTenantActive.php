@@ -14,7 +14,7 @@ class EnsureTenantActive
         /** @var TenantContext $tenantContext */
         $tenantContext = app(TenantContext::class);
 
-        if (! $tenantContext->tenant->status === 'active' && ! $tenantContext->tenant->status === 'trial') {
+        if (! in_array($tenantContext->tenant->status, ['active', 'trial'])) {
             return response()->json([
                 'message' => 'Tenant account is not active.',
                 'status' => $tenantContext->tenant->status,
