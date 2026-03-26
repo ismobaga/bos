@@ -1,0 +1,177 @@
+services:
+  # Laravel Application
+  platform-web:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+    container_name: crommix-web
+    restart: unless-stopped
+    environment:
+      - APP_ENV=${APP_ENV:-production}
+      - APP_KEY=${APP_KEY}
+      - APP_URL=${APP_URL:-https://app.crommixmali.com}
+      - DB_CONNECTION=pgsql
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_DATABASE=${DB_DATABASE:-crommix_bos}
+      - DB_USERNAME=${DB_USERNAME:-crommix}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - MINIO_ENDPOINT=http://minio:9000
+      - MINIO_KEY=${MINIO_KEY:-minioadmin}
+      - MINIO_SECRET=${MINIO_SECRET:-minioadmin}
+      - MINIO_BUCKET=${MINIO_BUCKET:-crommix-bos}
+      - QUEUE_CONNECTION=redis
+      - CACHE_STORE=redis
+      - SESSION_DRIVER=redis
+    volumes:
+      - ./:/var/www/html
+      - ./docker/php/php.ini:/usr/local/etc/php/conf.d/custom.ini
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - crommix
+
+  # Queue Worker
+  platform-worker:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+    container_name: crommix-worker
+    restart: unless-stopped
+    command: php artisan queue:work --sleep=3 --tries=3 --max-time=3600
+    environment:
+      - APP_ENV=${APP_ENV:-production}
+      - APP_KEY=${APP_KEY}
+      - DB_HOST=postgres
+      - DB_DATABASE=${DB_DATABASE:-crommix_bos}
+      - DB_USERNAME=${DB_USERNAME:-crommix}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - REDIS_HOST=redis
+      - QUEUE_CONNECTION=redis
+    volumes:
+      - ./:/var/www/html
+    depends_on:
+      - platform-web
+      - redis
+      - postgres
+    networks:
+      - crommix
+
+  # Scheduler
+  platform-scheduler:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+    container_name: crommix-scheduler
+    restart: unless-stopped
+    command: >
+      sh -c "while true; do php /var/www/html/artisan schedule:run --no-interaction >> /dev/null 2>&1; sleep 60; done"
+    environment:
+      - APP_ENV=${APP_ENV:-production}
+      - APP_KEY=${APP_KEY}
+      - DB_HOST=postgres
+      - DB_DATABASE=${DB_DATABASE:-crommix_bos}
+      - DB_USERNAME=${DB_USERNAME:-crommix}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - REDIS_HOST=redis
+    volumes:
+      - ./:/var/www/html
+    depends_on:
+      - platform-web
+      - postgres
+    networks:
+      - crommix
+
+  # PostgreSQL
+  postgres:
+    image: postgres:16-alpine
+    container_name: crommix-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_DATABASE:-crommix_bos}
+      POSTGRES_USER: ${DB_USERNAME:-crommix}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-secret}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-crommix}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - crommix
+
+  # Redis
+  redis:
+    image: redis:7-alpine
+    container_name: crommix-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - crommix
+
+  # MinIO Object Storage
+  minio:
+    image: minio/minio:latest
+    container_name: crommix-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET:-minioadmin}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - crommix
+
+  # Reverse Proxy (Caddy)
+  reverse-proxy:
+    image: caddy:2-alpine
+    container_name: crommix-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - platform-web
+    networks:
+      - crommix
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  crommix:
+    driver: bridge
